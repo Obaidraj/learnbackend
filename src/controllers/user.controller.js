@@ -4,6 +4,14 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import sendEmail from "../utils/emailSender.js";
+let otpStore = {};
+// Expire OTP after 5 minutes
+setTimeout(() => {
+  delete otpStore.otp;
+  delete otpStore.email;
+}, 5 * 60 * 1000); // 5 minutes
 
 const generateAccessAndRefreshToken = async (userId) => {
   try {
@@ -200,8 +208,9 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const changeCurretPassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   const user = await User.findById(req.user._id);
-  const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
-  if (!isPasswordCorrect) {
+  const isPasswordValid = await user.isPasswordCorrect(oldPassword);
+
+  if (!isPasswordValid) {
     throw new ApiError(400, "Invalid Old Password");
   }
   user.password = newPassword;
@@ -229,7 +238,14 @@ const updateAccountDetail = asyncHandler(async (req, res) => {
 });
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
-  const avatarLocalPath = req.file?.path;
+  let avatarLocalPath;
+  if (
+    req.files &&
+    Array.isArray(req.files?.avatar) &&
+    req.files?.avatar.length > 0
+  ) {
+    avatarLocalPath = req.files?.avatar[0]?.path;
+  }
   if (!avatarLocalPath) {
     throw new ApiError(400, "Avatar file is missing");
   }
@@ -254,7 +270,14 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
 });
 
 const updateUserCoverImage = asyncHandler(async (req, res) => {
-  const coverImageLocalPath = req.file?.path;
+  let coverImageLocalPath;
+  if (
+    req.files &&
+    Array.isArray(req.files?.coverImage) &&
+    req.files?.coverImage.length > 0
+  ) {
+    coverImageLocalPath = req.files?.coverImage[0]?.path;
+  }
   if (!coverImageLocalPath) {
     throw new ApiError(400, "Cover Image file is missing");
   }
@@ -277,6 +300,48 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Cover Image updated successfully"));
 });
+const sendOtp = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new ApiError(404, "User with this email does not exist");
+  }
+  const otp = crypto.randomInt(100000, 999999).toString();
+  otpStore.otp = otp;
+  otpStore.email = email;
+  try {
+    await sendEmail(email, "Your OTP Code", `Your OTP code is: ${otp}`);
+    res
+      .status(200)
+      .json(new ApiResponse(200, {}, "OTP has been sent to your email"));
+  } catch (error) {
+    throw new ApiError(500, "Failed to send OTP");
+  }
+});
+const verifyOtp = asyncHandler(async (req, res) => {
+  const { otp } = req.body;
+  if (+otpStore.otp === +otp) {
+    delete otpStore.otp;
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, "OTP verified successfully"));
+  } else {
+    throw new ApiError(400, "Invalid or expired OTP");
+  }
+});
+const forgetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  const user = await User.findOne({ email: otpStore.email });
+  if (!user) {
+    throw new ApiError(404, "User with this email does not exist");
+  }
+  console.log(user)
+  user.password = password;
+  await user.save({ validateBeforeSave: false });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Password changed successfully"));
+});
 
 export {
   registerUser,
@@ -287,5 +352,8 @@ export {
   getCurrentUser,
   updateAccountDetail,
   updateUserAvatar,
-  updateUserCoverImage
+  updateUserCoverImage,
+  sendOtp,
+  verifyOtp,
+  forgetPassword,
 };
