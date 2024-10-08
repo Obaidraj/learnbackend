@@ -6,10 +6,6 @@ dotenv.config({
     path:'./.env'
 });
 const port=process.env.PORT||8080
-
-
-
-
 connectDB().then(()=>{
     app.listen(port,()=>console.log(`Sever is running on ${port} `))
 }).catch(error=>{
